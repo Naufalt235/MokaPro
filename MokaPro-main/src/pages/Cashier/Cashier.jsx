@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import DashboardNavbar from '../../components/DashboardNavbar/DashboardNavbar';
 import ProductGrid from '../../components/ProductGrid/ProductGrid';
 import Cart from '../../components/Cart/Cart';
 import CustomizeProductModal from '../../components/CustomizeProductModal/CustomizeProductModal';
 import TableSelectionModal from '../../components/TableSelectionModal/TableSelectionModal';
+import SeatSelectionModal from '../../components/SeatSelectionModal/SeatSelectionModal'; // Import Modal Baru
 import PaymentModal from '../../components/PaymentModal/PaymentModal';
 import espressoImg from '../../assets/product-espresso.png';
 import latteImg from '../../assets/product-latte.png';
@@ -13,58 +14,6 @@ import v60Img from '../../assets/product-v60.png';
 import croissantImg from '../../assets/product-croissant.png';
 import './Cashier.css';
 
-// Master data produk sesuai desain Figma
-const PRODUCTS_DATA = [
-  {
-    id: 1,
-    name: 'Espresso Double',
-    category: 'Espresso Based',
-    price: 22000,
-    image: espressoImg,
-    notes: 'Normal'
-  },
-  {
-    id: 2,
-    name: 'Caffe Latte',
-    category: 'Espresso Based',
-    price: 28000,
-    image: latteImg,
-    notes: 'Hot'
-  },
-  {
-    id: 3,
-    name: 'Kopi Susu Gula Aren',
-    category: 'Espresso Based',
-    price: 25000,
-    image: kopiSusuImg,
-    notes: 'Sedikit Es, Gula Normal'
-  },
-  {
-    id: 4,
-    name: 'Matcha Latte',
-    category: 'Non-Coffee',
-    price: 30000,
-    image: matchaImg,
-    notes: 'Ice'
-  },
-  {
-    id: 5,
-    name: 'V60 Single Origin',
-    category: 'Manual Brew',
-    price: 32000,
-    image: v60Img,
-    notes: 'Beans Gayo'
-  },
-  {
-    id: 6,
-    name: 'Butter Croissant',
-    category: 'Pastry & Food',
-    price: 24000,
-    image: croissantImg,
-    notes: 'Hangatkan'
-  }
-];
-
 const CATEGORIES = [
   'Semua',
   'Espresso Based',
@@ -73,45 +22,58 @@ const CATEGORIES = [
   'Pastry & Food'
 ];
 
-/**
- * Cashier Page Component
- * Route: /cashier
- * Menangani alur POS Kasir: pencarian, filter kategori, penambahan ke cart dengan Customize Modal,
- * pemilihan meja (Table Selection Modal), dan checkout
- */
 export default function Cashier() {
-  const [cartItems, setCartItems] = useState([]);
+  // State Produk & Filter
+  const [products, setProducts] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [searchQuery, setSearchQuery] = useState('');
-  const [orderType, setOrderType] = useState('Dine-In'); // 'Dine-In' | 'Takeaway'
-  const [selectedTable, setSelectedTable] = useState('Meja 01');
 
-  // Modal States
+  // State Keranjang & Pesanan
+  const [cartItems, setCartItems] = useState([]);
+  const [orderType, setOrderType] = useState('Dine-In');
+  const [selectedTable, setSelectedTable] = useState('Tanpa Meja');
+  
+  // State Modals
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+  const [isSeatModalOpen, setIsSeatModalOpen] = useState(false); // State Modal Input Kursi
+  const [pendingTable, setPendingTable] = useState(null); // Menyimpan meja sementara sebelum input kursi
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
-  // Filter produk berdasarkan kategori dan pencarian
+  // Ambil data produk dari localStorage (atau fallback)
+  useEffect(() => {
+    const savedProducts = JSON.parse(localStorage.getItem('mokapro_products'));
+    
+    if (savedProducts) {
+      const activeProducts = savedProducts.filter(p => p.status === 'Aktif');
+      const mappedProducts = activeProducts.map(dbProduct => {
+        let img = espressoImg; 
+        if (dbProduct.name.includes('Latte')) img = latteImg;
+        if (dbProduct.name.includes('Kopi Susu')) img = kopiSusuImg;
+        if (dbProduct.name.includes('Matcha')) img = matchaImg;
+        if (dbProduct.name.includes('V60')) img = v60Img;
+        if (dbProduct.name.includes('Croissant')) img = croissantImg;
+        return { ...dbProduct, image: img };
+      });
+      setProducts(mappedProducts);
+    }
+  }, []);
+
+  // Filter Produk
   const filteredProducts = useMemo(() => {
-    return PRODUCTS_DATA.filter((product) => {
-      const matchCategory =
-        selectedCategory === 'Semua' || product.category === selectedCategory;
-      const matchSearch = product.name
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase());
+    return products.filter((product) => {
+      const matchCategory = selectedCategory === 'Semua' || product.category === selectedCategory;
+      const matchSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
       return matchCategory && matchSearch;
     });
-  }, [selectedCategory, searchQuery]);
+  }, [products, selectedCategory, searchQuery]);
 
-  // Hitung total (sudah termasuk PB1 10%)
-  const subtotal = cartItems.reduce(
-    (acc, item) => acc + item.price * item.quantity,
-    0
-  );
+  // Hitung Total
+  const subtotal = cartItems.reduce((acc, item) => acc + item.price * item.quantity, 0);
   const total = subtotal + Math.round(subtotal * 0.1);
 
-  // Buka modal kustomisasi saat produk diklik
+  // --- FUNGSI KERANJANG ---
   const handleOpenCustomize = (product) => {
     setSelectedProduct(product);
     setIsCustomizeModalOpen(true);
@@ -122,194 +84,172 @@ export default function Cashier() {
     setSelectedProduct(null);
   };
 
-  // Tambah produk dari modal kustomisasi ke keranjang
   const handleAddToCartFromModal = (customizedProduct) => {
     setCartItems((prevItems) => {
       const existingIndex = prevItems.findIndex(
-        (item) =>
-          item.id === customizedProduct.id &&
-          item.notes === customizedProduct.notes
+        (item) => item.id === customizedProduct.id && item.notes === customizedProduct.notes
       );
-
       if (existingIndex > -1) {
         const updated = [...prevItems];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          quantity: updated[existingIndex].quantity + 1
-        };
+        updated[existingIndex] = { ...updated[existingIndex], quantity: updated[existingIndex].quantity + 1 };
         return updated;
       }
-
-      return [
-        ...prevItems,
-        {
-          ...customizedProduct,
-          quantity: 1
-        }
-      ];
+      return [...prevItems, { ...customizedProduct, quantity: 1 }];
     });
   };
 
-  // Update kuantitas item di keranjang
   const handleUpdateQuantity = (productId, newQuantity) => {
     if (newQuantity <= 0) {
       setCartItems((prev) => prev.filter((item) => item.id !== productId));
     } else {
-      setCartItems((prev) =>
-        prev.map((item) =>
-          item.id === productId ? { ...item, quantity: newQuantity } : item
-        )
-      );
+      setCartItems((prev) => prev.map((item) => item.id === productId ? { ...item, quantity: newQuantity } : item));
     }
   };
 
-  // Kosongkan keranjang
-  const handleResetCart = () => {
-    setCartItems([]);
-  };
+  const handleResetCart = () => setCartItems([]);
 
-  // Buka modal denah meja dari tombol Checkout (Proses Bayar) atau toolbar
+  // --- FUNGSI CHECKOUT & MEJA ---
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
-    setIsTableModalOpen(true);
+    if (orderType === 'Takeaway') {
+      setIsPaymentModalOpen(true); // Langsung bayar jika takeaway
+    } else {
+      setIsTableModalOpen(true); // Pilih meja jika Dine-In
+    }
   };
 
-  // Konfirmasi meja dari TableSelectionModal → buka PaymentModal
-  const handleConfirmTable = (tableName, type = 'Dine-In') => {
-    setSelectedTable(tableName);
-    setOrderType(type);
+  // Dipanggil saat meja dipilih dari denah
+  const handleConfirmTable = (tableName, type = 'Dine-In', maxSeats = 0) => {
     setIsTableModalOpen(false);
-    setIsPaymentModalOpen(true);
+    
+    if (type === 'Takeaway') {
+      setSelectedTable('Tanpa Meja');
+      setOrderType('Takeaway');
+      setIsPaymentModalOpen(true);
+    } else {
+      // Buka modal input jumlah kursi
+      setPendingTable({ name: tableName, maxSeats });
+      setIsSeatModalOpen(true);
+    }
   };
 
-  // Konfirmasi pembayaran dari PaymentModal
+  // Dipanggil saat kasir memasukkan jumlah kursi
+  const handleSeatConfirm = (seatCount) => {
+    if (seatCount > pendingTable.maxSeats) {
+      alert(`Maaf, Meja ${pendingTable.name} hanya muat maksimal ${pendingTable.maxSeats} orang.`);
+      return;
+    }
+    
+    setSelectedTable(pendingTable.name);
+    setOrderType('Dine-In');
+    setIsSeatModalOpen(false);
+    setIsPaymentModalOpen(true);
+
+    // Simpan jumlah kursi sementara di localStorage untuk dikirim ke KDS
+    localStorage.setItem('mokapro_temp_seats', seatCount);
+  };
+
+  // --- FUNGSI PEMBAYARAN SUKSES ---
   const handlePaymentConfirm = ({ method, cashReceived, change }) => {
     setIsPaymentModalOpen(false);
-    // TODO: integrate PaymentSuccessModal here
-    alert(
-      `Pembayaran berhasil!\nMetode: ${method === 'qris' ? 'QRIS' : 'Tunai'}${
-        method === 'cash'
-          ? `\nDiterima: Rp ${cashReceived.toLocaleString('id-ID')}\nKembalian: Rp ${change.toLocaleString('id-ID')}`
-          : ''
-      }`
-    );
+    
+    // 1. Buat ID Transaksi
+    const trxId = `TRX-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+    const seatCount = localStorage.getItem('mokapro_temp_seats') || 1;
+
+    // 2. Susun data pesanan
+    const newOrder = {
+      id: trxId,
+      date: new Date().toLocaleString('id-ID'),
+      type: orderType,
+      table: selectedTable,
+      seats: seatCount,
+      items: cartItems,
+      subtotal: subtotal,
+      tax: Math.round(subtotal * 0.1),
+      total: total,
+      method: method === 'qris' ? 'QRIS' : 'Tunai',
+      status: 'Selesai'
+    };
+
+    // 3. Simpan ke Riwayat (History)
+    const existingHistory = JSON.parse(localStorage.getItem('mokapro_history')) || [];
+    localStorage.setItem('mokapro_history', JSON.stringify([newOrder, ...existingHistory]));
+
+    // 4. Simpan ke Antrean Dapur (KDS)
+    const existingKDS = JSON.parse(localStorage.getItem('mokapro_kds')) || [];
+    const kdsOrder = { 
+      ...newOrder, 
+      status: 'Menunggu', 
+      time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) 
+    };
+    localStorage.setItem('mokapro_kds', JSON.stringify([kdsOrder, ...existingKDS]));
+
+    // 5. Notifikasi & Reset
+    alert(`Pembayaran Berhasil!\nID: ${trxId}\nPesanan dikirim ke Dapur.`);
     setCartItems([]);
-    setSelectedTable('Meja 01');
+    setSelectedTable('Tanpa Meja');
     setOrderType('Dine-In');
+    localStorage.removeItem('mokapro_temp_seats');
   };
 
-  const handleHoldOrder = () => {
-    alert('Pesanan telah ditahan');
-  };
+  const handleHoldOrder = () => alert('Pesanan telah ditahan');
 
+  // --- TAMPILAN UI ---
   return (
     <div className="cashier-page">
-      {/* Dashboard Navbar */}
-      <DashboardNavbar
-        role="cashier"
-        storeName="Cabang Utama Toko"
-        userName="Kasir 01"
-        userRoleLabel="Kasir"
-      />
+      <DashboardNavbar role="cashier" storeName="Cabang Utama Toko" userName="Kasir 01" userRoleLabel="Kasir" />
 
-      {/* Main Content: Left (Products) & Right (Cart) */}
       <main className="cashier-main">
         <div className="cashier-container">
-          {/* Left Column: Search, Order Mode, Categories, Product Grid */}
           <section className="cashier-products-section">
-            {/* Top Toolbar: Search + Dine-In/Takeaway / Table */}
             <div className="cashier-toolbar">
               <div className="cashier-search-wrap">
                 <input
                   type="text"
                   className="cashier-search-input"
-                  placeholder=""
+                  placeholder="Cari menu..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  aria-label="Cari menu produk"
                 />
               </div>
 
               <div className="cashier-order-options">
-                <button
-                  type="button"
-                  className="cashier-option-btn table-select-btn"
-                  onClick={() => setIsTableModalOpen(true)}
-                >
-                  <svg
-                    className="option-icon"
-                    viewBox="0 0 24 24"
-                    width="14"
-                    height="14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <rect x="3" y="3" width="7" height="7" />
-                    <rect x="14" y="3" width="7" height="7" />
-                    <rect x="14" y="14" width="7" height="7" />
-                    <rect x="3" y="14" width="7" height="7" />
+                <button type="button" className="cashier-option-btn table-select-btn" onClick={() => setIsTableModalOpen(true)}>
+                  <svg className="option-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
                   </svg>
-                  <span>Pilih Meja</span>
+                  <span>{selectedTable !== 'Tanpa Meja' ? selectedTable : 'Pilih Meja'}</span>
                 </button>
 
-                <button
-                  type="button"
-                  className={`cashier-option-btn mode-btn ${
-                    orderType === 'Dine-In' ? 'active' : ''
-                  }`}
-                  onClick={() => setOrderType('Dine-In')}
-                >
+                <button type="button" className={`cashier-option-btn mode-btn ${orderType === 'Dine-In' ? 'active' : ''}`} onClick={() => setOrderType('Dine-In')}>
                   Dine-In
                 </button>
 
-                <button
-                  type="button"
-                  className={`cashier-option-btn mode-btn ${
-                    orderType === 'Takeaway' ? 'active' : ''
-                  }`}
-                  onClick={() => {
-                    setOrderType('Takeaway');
-                    setSelectedTable('Tanpa Meja');
-                  }}
-                >
+                <button type="button" className={`cashier-option-btn mode-btn ${orderType === 'Takeaway' ? 'active' : ''}`} onClick={() => { setOrderType('Takeaway'); setSelectedTable('Tanpa Meja'); }}>
                   Takeaway
                 </button>
               </div>
             </div>
 
-            {/* Category Filter Pills */}
-            <div className="cashier-categories-bar" role="tablist" aria-label="Filter Kategori Menu">
-              {CATEGORIES.map((cat) => {
-                const isActive = selectedCategory === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    className={`cashier-category-pill ${isActive ? 'active' : ''}`}
-                    onClick={() => setSelectedCategory(cat)}
-                  >
-                    {cat}
-                  </button>
-                );
-              })}
+            <div className="cashier-categories-bar" role="tablist">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  className={`cashier-category-pill ${selectedCategory === cat ? 'active' : ''}`}
+                  onClick={() => setSelectedCategory(cat)}
+                >
+                  {cat}
+                </button>
+              ))}
             </div>
 
-            {/* Products Grid */}
             <div className="cashier-grid-wrap">
-              <ProductGrid
-                products={filteredProducts}
-                onAddToCart={handleOpenCustomize}
-              />
+              <ProductGrid products={filteredProducts} onAddToCart={handleOpenCustomize} />
             </div>
           </section>
 
-          {/* Right Column: Transaction Cart Panel */}
           <section className="cashier-cart-section">
             <Cart
               cartItems={cartItems}
@@ -324,7 +264,7 @@ export default function Cashier() {
         </div>
       </main>
 
-      {/* Customize Product Modal */}
+      {/* Modal Kustomisasi Produk */}
       {isCustomizeModalOpen && selectedProduct && (
         <CustomizeProductModal
           key={selectedProduct.id}
@@ -335,7 +275,7 @@ export default function Cashier() {
         />
       )}
 
-      {/* Table Selection Modal */}
+      {/* Modal Denah Meja */}
       {isTableModalOpen && (
         <TableSelectionModal
           key={selectedTable}
@@ -346,7 +286,17 @@ export default function Cashier() {
         />
       )}
 
-      {/* Payment Modal */}
+      {/* Modal Input Jumlah Kursi (BARU) */}
+      {isSeatModalOpen && pendingTable && (
+        <SeatSelectionModal
+          isOpen={isSeatModalOpen}
+          tableName={pendingTable.name}
+          onClose={() => setIsSeatModalOpen(false)}
+          onConfirm={handleSeatConfirm}
+        />
+      )}
+
+      {/* Modal Pembayaran */}
       {isPaymentModalOpen && (
         <PaymentModal
           isOpen={isPaymentModalOpen}
@@ -356,19 +306,12 @@ export default function Cashier() {
         />
       )}
 
-      {/* Footer Bar */}
       <footer className="cashier-footer">
         <div className="cashier-footer-container">
-          <p className="cashier-footer-copy">
-            © 2026 Moka Pro POS &amp; Roastery OS. Dirancang untuk operasional kopi spesialitas.
-          </p>
-
+          <p className="cashier-footer-copy">© 2026 Moka Pro POS & Roastery OS.</p>
           <div className="cashier-footer-status">
-            <div className="status-indicator">
-              <span className="status-dot" aria-hidden="true"></span>
-              <span className="status-text">Cloud Tersinkronisasi</span>
-            </div>
-            <span className="status-separator" aria-hidden="true">•</span>
+            <div className="status-indicator"><span className="status-dot"></span><span className="status-text">Cloud Tersinkronisasi</span></div>
+            <span className="status-separator">•</span>
             <span className="terminal-id">Terminal #01</span>
           </div>
         </div>
